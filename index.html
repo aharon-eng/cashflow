@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -366,9 +365,21 @@
     <div class="logo">📊</div>
     <h1>תזרים מאוחד</h1>
     <div class="sub2">קבוצת אדני ארץ · שיקים, הלוואות והתחייבויות</div>
-    <input id="auth-email" type="email" placeholder="name@company.com" autocomplete="email">
-    <button class="btn primary" id="auth-btn" type="button" onclick="sendLoginLink()">שליחת קישור כניסה למייל</button>
+    <div id="pin-mode">
+      <input id="auth-pin" type="password" inputmode="numeric" placeholder="קוד גישה" autocomplete="off" style="letter-spacing:6px; font-size:20px">
+      <button class="btn primary" id="pin-btn" type="button" onclick="pinLogin()">כניסה</button>
+    </div>
+    <div id="email-mode" style="display:none">
+      <input id="auth-email" type="email" placeholder="name@company.com" autocomplete="email">
+      <button class="btn primary" id="auth-btn" type="button" onclick="sendLoginLink()">שליחת קישור כניסה למייל</button>
+    </div>
+    <div id="name-mode" style="display:none">
+      <p style="font-size:14px; margin-bottom:10px">איך קוראים לך? (יוצג ליד עדכונים שתעשה)</p>
+      <input id="auth-name" type="text" placeholder="שם פרטי">
+      <button class="btn primary" type="button" onclick="saveName()">המשך</button>
+    </div>
     <div id="auth-msg"></div>
+    <button type="button" id="mode-toggle" onclick="toggleAuthMode()" style="background:none; border:none; color:var(--accent); font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; margin-top:16px">כניסת מנהל עם מייל</button>
   </div>
 </div>
 
@@ -597,7 +608,7 @@ function cloudSave(){
   cloudTimer=setTimeout(async ()=>{
     if(!ME) return;
     const stamp=new Date().toISOString();
-    const {error}=await sb.from("app_state").upsert({id:STATE_ID,data:store,updated_at:stamp,updated_by:ME});
+    const {error}=await sb.from("app_state").upsert({id:STATE_ID,data:store,updated_at:stamp,updated_by:whoAmI()});
     if(!error) lastRemoteStamp=stamp;
     syncMsg(error ? "⚠ שמירה נכשלה — בדקו חיבור" : "מסונכרן ✓ "+new Date().toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"}));
   },700);
@@ -608,7 +619,7 @@ async function pollRemote(){
   try{
     const {data}=await sb.from("app_state").select("updated_at,updated_by,data").eq("id",STATE_ID).single();
     if(!data) return;
-    if(lastRemoteStamp && data.updated_at!==lastRemoteStamp && data.updated_by!==ME){
+    if(lastRemoteStamp && data.updated_at!==lastRemoteStamp && data.updated_by!==whoAmI()){
       store=Object.assign({records:[]},data.data||{});
       lastRemoteStamp=data.updated_at;
       rerender();
@@ -1002,7 +1013,7 @@ el("fMonth").addEventListener("change", renderList);
 const imgIds = new Set();
 function refreshImgIds(){ imgIds.clear(); for(const r of store.records){ if(r.img) imgIds.add(r.id); } }
 async function putImg(id, data){
-  const {error} = await sb.from("app_state").upsert({id:"cf_img_"+id, data:{img:data}, updated_at:new Date().toISOString(), updated_by:ME});
+  const {error} = await sb.from("app_state").upsert({id:"cf_img_"+id, data:{img:data}, updated_at:new Date().toISOString(), updated_by:whoAmI()});
   if(error) throw error;
   const r = store.records.find(x=>x.id===id); if(r) r.img = true;
   imgIds.add(id);
@@ -1169,6 +1180,33 @@ el("addForm").addEventListener("submit", ev=>{
 });
 
 /* ================= כניסה והרשאות ================= */
+const STAFF_EMAIL = "staff@adnei-eretz.com";
+let MYNAME = localStorage.getItem("cf-name") || "";
+function whoAmI(){ return (ME === STAFF_EMAIL) ? (MYNAME || "צוות") : ME; }
+function toggleAuthMode(){
+  const pinShown = el("pin-mode").style.display !== "none";
+  el("pin-mode").style.display = pinShown ? "none" : "";
+  el("email-mode").style.display = pinShown ? "" : "none";
+  el("mode-toggle").textContent = pinShown ? "חזרה לכניסה עם קוד" : "כניסת מנהל עם מייל";
+  el("auth-msg").textContent = "";
+}
+async function pinLogin(){
+  const pin = (el("auth-pin").value||"").trim();
+  if(!pin){ el("auth-msg").textContent = "נא להזין את קוד הגישה"; return; }
+  el("pin-btn").disabled = true; el("pin-btn").textContent = "נכנס…";
+  const {error} = await sb.auth.signInWithPassword({email: STAFF_EMAIL, password: "adnei-"+pin});
+  el("pin-btn").disabled = false; el("pin-btn").textContent = "כניסה";
+  if (error){ el("auth-msg").textContent = "קוד שגוי — נסו שוב"; return; }
+  /* ההמשך קורה אוטומטית דרך onAuthStateChange */
+}
+function saveName(){
+  const n = (el("auth-name").value||"").trim();
+  if(!n){ el("auth-msg").textContent = "נא להזין שם"; return; }
+  MYNAME = n;
+  try{ localStorage.setItem("cf-name", n); }catch(e){}
+  el("name-mode").style.display = "none";
+  finishEnter();
+}
 async function sendLoginLink(){
   const email = (el("auth-email").value||"").trim();
   if(!email || !email.includes("@")){ el("auth-msg").textContent = "נא להזין כתובת מייל"; return; }
@@ -1203,15 +1241,24 @@ async function enterApp(session){
     if (remote.data && (remote.data.records||[]).length){
       store = Object.assign({records:[]}, remote.data);
     } else {
-      await sb.from("app_state").upsert({id:STATE_ID, data:store, updated_by:ME, updated_at:new Date().toISOString()});
+      await sb.from("app_state").upsert({id:STATE_ID, data:store, updated_by:whoAmI(), updated_at:new Date().toISOString()});
     }
     lastRemoteStamp = remote.updated_at;
   } else {
-    await sb.from("app_state").upsert({id:STATE_ID, data:store, updated_by:ME, updated_at:new Date().toISOString()});
+    await sb.from("app_state").upsert({id:STATE_ID, data:store, updated_by:whoAmI(), updated_at:new Date().toISOString()});
   }
+  if (ME === STAFF_EMAIL && !MYNAME){
+    el("pin-mode").style.display = "none"; el("email-mode").style.display = "none";
+    el("mode-toggle").style.display = "none"; el("auth-msg").textContent = "";
+    el("name-mode").style.display = "";
+    return;
+  }
+  finishEnter();
+}
+function finishEnter(){
   el("auth-gate").style.display = "none";
   el("app").style.display = "block";
-  el("me-mail").textContent = ME;
+  el("me-mail").textContent = whoAmI();
   el("me-role").textContent = ROLE;
   applyRole();
   initMonths(); initAdd(); renderCoChips(); rerender();
@@ -1224,6 +1271,8 @@ function applyRole(){
   el("addTab").style.display = canEdit ? "" : "none";
   el("usersTab").style.display = ROLE==="מנהל" ? "" : "none";
 }
+el("auth-pin").addEventListener("keydown", e=>{ if (e.key==="Enter") pinLogin(); });
+el("auth-name").addEventListener("keydown", e=>{ if (e.key==="Enter") saveName(); });
 sb.auth.onAuthStateChange((ev, session)=>{ if (session) enterApp(session); });
 sb.auth.getSession().then(({data})=>{ if (data && data.session) enterApp(data.session); });
 
