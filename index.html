@@ -1180,7 +1180,7 @@ el("addForm").addEventListener("submit", ev=>{
 });
 
 /* ================= כניסה והרשאות ================= */
-const STAFF_EMAIL = "staff@adnei-eretz.com";
+const STAFF_EMAIL = "team@adnei-eretz.com";
 let MYNAME = localStorage.getItem("cf-name") || "";
 function whoAmI(){ return (ME === STAFF_EMAIL) ? (MYNAME || "צוות") : ME; }
 function toggleAuthMode(){
@@ -1222,6 +1222,23 @@ async function signOut(){ try{ await sb.auth.signOut(); }catch(e){} location.rel
 async function enterApp(session){
   if (ME) return;
   const email = session.user.email.toLowerCase();
+  if (email === STAFF_EMAIL){
+    /* משתמש הצוות המשותף — נכנס עם קוד הגישה, מאושר תמיד כתפקיד עובד */
+    ME = email; ROLE = "עובד";
+    const {data:remote} = await sb.from("app_state").select("data,updated_at").eq("id", STATE_ID).single();
+    if (remote && remote.data && (remote.data.records||[]).length){
+      store = Object.assign({records:[]}, remote.data);
+      lastRemoteStamp = remote.updated_at;
+    }
+    if (!MYNAME){
+      el("pin-mode").style.display = "none"; el("email-mode").style.display = "none";
+      el("mode-toggle").style.display = "none"; el("auth-msg").textContent = "";
+      el("name-mode").style.display = "";
+      return;
+    }
+    finishEnter();
+    return;
+  }
   const {data:allowed, error:aerr} = await sb.from("allowed_users").select("email,role,approved").ilike("email", email);
   if (aerr || !allowed || !allowed.length){
     await sb.from("allowed_users").insert({email, role:"עובד", approved:false});
