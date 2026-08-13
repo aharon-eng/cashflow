@@ -1336,11 +1336,13 @@ el("importFile").addEventListener("change", async ev=>{
     let n = 0;
     for (const r of arr){
       if (r && r.p && r.d){
-        store.records.push({
+        const rec = {
           id: newId(), p: String(r.p), d: String(r.d).slice(0,10),
           a: (r.a==null || r.a==="") ? null : +r.a,
-          c: String(r.c || "אחר"), t: r.t, n: r.n || "", paid: !!r.paid, img: false
-        });
+          c: String(r.c || "אחר"), n: r.n || "", paid: !!r.paid, img: false
+        };
+        if (r.t) rec.t = r.t;
+        store.records.push(rec);
         n++;
       }
     }
