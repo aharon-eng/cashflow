@@ -369,17 +369,12 @@
       <input id="auth-pin" type="password" inputmode="numeric" placeholder="קוד גישה" autocomplete="off" style="letter-spacing:6px; font-size:20px">
       <button class="btn primary" id="pin-btn" type="button" onclick="pinLogin()">כניסה</button>
     </div>
-    <div id="email-mode" style="display:none">
-      <input id="auth-email" type="email" placeholder="name@company.com" autocomplete="email">
-      <button class="btn primary" id="auth-btn" type="button" onclick="sendLoginLink()">שליחת קישור כניסה למייל</button>
-    </div>
     <div id="name-mode" style="display:none">
       <p style="font-size:14px; margin-bottom:10px">איך קוראים לך? (יוצג ליד עדכונים שתעשה)</p>
       <input id="auth-name" type="text" placeholder="שם פרטי">
       <button class="btn primary" type="button" onclick="saveName()">המשך</button>
     </div>
     <div id="auth-msg"></div>
-    <button type="button" id="mode-toggle" onclick="toggleAuthMode()" style="background:none; border:none; color:var(--accent); font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; margin-top:16px">כניסת מנהל עם מייל</button>
   </div>
 </div>
 
@@ -516,24 +511,8 @@
       </div>
     </section>
 
-    <!-- ============ USERS / ADMIN ============ -->
+    <!-- ============ ADMIN ============ -->
     <section class="view" id="view-users">
-      <div class="card" style="max-width:640px">
-        <h2 class="sec">בקשות ממתינות לאישור</h2>
-        <div id="pendingUsers"><div class="empty" style="padding:14px">אין בקשות ממתינות</div></div>
-      </div>
-      <div class="card" style="max-width:640px">
-        <h2 class="sec">משתמשים מאושרים</h2>
-        <div id="activeUsers"></div>
-        <div class="form-grid" style="margin-top:16px">
-          <div class="fld"><label for="u-mail">הוספת משתמש (מייל)</label><input id="u-mail" type="email" placeholder="name@company.com" style="direction:ltr"></div>
-          <div class="fld"><label for="u-role">תפקיד</label>
-            <select id="u-role"><option>עובד</option><option>מנהל</option><option>צפייה</option></select>
-          </div>
-        </div>
-        <div class="form-actions"><button class="btn primary" type="button" onclick="addAllowedUser()">הוספה</button></div>
-        <p class="hint">מנהל — רואה ועורך הכל כולל מחיקה וניהול משתמשים · עובד — מוסיף ומעדכן · צפייה — רואה בלבד.</p>
-      </div>
       <div class="card" style="max-width:640px">
         <h2 class="sec">נתונים</h2>
         <div class="form-actions" style="margin-top:0">
@@ -1183,13 +1162,6 @@ el("addForm").addEventListener("submit", ev=>{
 const STAFF_EMAIL = "team@adnei-eretz.com";
 let MYNAME = localStorage.getItem("cf-name") || "";
 function whoAmI(){ return (ME === STAFF_EMAIL) ? (MYNAME || "צוות") : ME; }
-function toggleAuthMode(){
-  const pinShown = el("pin-mode").style.display !== "none";
-  el("pin-mode").style.display = pinShown ? "none" : "";
-  el("email-mode").style.display = pinShown ? "" : "none";
-  el("mode-toggle").textContent = pinShown ? "חזרה לכניסה עם קוד" : "כניסת מנהל עם מייל";
-  el("auth-msg").textContent = "";
-}
 async function pinLogin(){
   const pin = (el("auth-pin").value||"").trim();
   if(!pin){ el("auth-msg").textContent = "נא להזין את קוד הגישה"; return; }
@@ -1207,32 +1179,21 @@ function saveName(){
   el("name-mode").style.display = "none";
   finishEnter();
 }
-async function sendLoginLink(){
-  const email = (el("auth-email").value||"").trim();
-  if(!email || !email.includes("@")){ el("auth-msg").textContent = "נא להזין כתובת מייל"; return; }
-  el("auth-btn").disabled = true; el("auth-btn").textContent = "שולח…";
-  const {error} = await sb.auth.signInWithOtp({email, options:{emailRedirectTo: location.origin + location.pathname}});
-  el("auth-btn").disabled = false; el("auth-btn").textContent = "שליחת קישור כניסה למייל";
-  el("auth-msg").innerHTML = error
-    ? ("שגיאה: " + esc(error.message))
-    : "✅ נשלח קישור אל <b dir='ltr'>" + esc(email) + "</b><br>פתחו את המייל ולחצו על הקישור (בדקו גם בספאם).";
-}
 async function signOut(){ try{ await sb.auth.signOut(); }catch(e){} location.reload(); }
 
 async function enterApp(session){
   if (ME) return;
   const email = session.user.email.toLowerCase();
   if (email === STAFF_EMAIL){
-    /* משתמש הצוות המשותף — נכנס עם קוד הגישה, מאושר תמיד כתפקיד עובד */
-    ME = email; ROLE = "עובד";
+    /* משתמש הצוות המשותף — כניסה עם קוד גישה, גישה מלאה */
+    ME = email; ROLE = "מנהל";
     const {data:remote} = await sb.from("app_state").select("data,updated_at").eq("id", STATE_ID).single();
     if (remote && remote.data && (remote.data.records||[]).length){
       store = Object.assign({records:[]}, remote.data);
       lastRemoteStamp = remote.updated_at;
     }
     if (!MYNAME){
-      el("pin-mode").style.display = "none"; el("email-mode").style.display = "none";
-      el("mode-toggle").style.display = "none"; el("auth-msg").textContent = "";
+      el("pin-mode").style.display = "none"; el("auth-msg").textContent = "";
       el("name-mode").style.display = "";
       return;
     }
@@ -1281,7 +1242,6 @@ function finishEnter(){
   initMonths(); initAdd(); renderCoChips(); rerender();
   syncMsg("מסונכרן ✓");
   pollTimer = setInterval(pollRemote, 8000);
-  if (ROLE === "מנהל") renderUsers();
 }
 function applyRole(){
   const canEdit = ROLE==="מנהל" || ROLE==="עובד";
@@ -1293,41 +1253,7 @@ el("auth-name").addEventListener("keydown", e=>{ if (e.key==="Enter") saveName()
 sb.auth.onAuthStateChange((ev, session)=>{ if (session) enterApp(session); });
 sb.auth.getSession().then(({data})=>{ if (data && data.session) enterApp(data.session); });
 
-/* ================= ניהול משתמשים (מנהל בלבד) ================= */
-async function renderUsers(){
-  const {data} = await sb.from("allowed_users").select("email,role,approved").order("email");
-  const list = data || [];
-  const pending = list.filter(u=>u.approved===false);
-  const active = list.filter(u=>u.approved!==false);
-  el("pendingUsers").innerHTML = pending.length ? pending.map(u=>
-    `<div class="u-row"><span class="u-mail">${esc(u.email)}</span>
-     <span><button class="btn primary" style="padding:6px 16px" onclick="approveUser('${esc(u.email)}')">אישור כניסה</button>
-     <button class="btn danger" style="padding:6px 14px" onclick="delAllowedUser('${esc(u.email)}')">דחייה</button></span></div>`
-  ).join("") : `<div class="empty" style="padding:14px">אין בקשות ממתינות</div>`;
-  el("activeUsers").innerHTML = active.map(u=>
-    `<div class="u-row"><span class="u-mail">${esc(u.email)}</span>
-     <span>${esc(u.role||"עובד")}${u.email.toLowerCase()===ADMIN_EMAIL
-       ? ' · <b>אדמין ראשי</b>'
-       : ` · <button class="btn ghost" style="padding:5px 14px" onclick="delAllowedUser('${esc(u.email)}')">הסרה</button>`}</span></div>`
-  ).join("") || `<div class="empty" style="padding:14px">אין משתמשים</div>`;
-}
-async function approveUser(email){
-  await sb.from("allowed_users").update({approved:true}).eq("email", email);
-  toast("אושר: " + email); renderUsers();
-}
-async function addAllowedUser(){
-  const email = (el("u-mail").value||"").trim().toLowerCase();
-  if (!email || !email.includes("@")){ toast("נא להזין מייל תקין"); return; }
-  const {error} = await sb.from("allowed_users").insert({email, role: el("u-role").value, approved:true});
-  toast(error ? "שגיאה — ייתכן שהמשתמש כבר קיים" : "נוסף: " + email);
-  el("u-mail").value = ""; renderUsers();
-}
-async function delAllowedUser(email){
-  await sb.from("allowed_users").delete().eq("email", email);
-  toast("הוסר: " + email); renderUsers();
-}
-
-/* ================= ייבוא / גיבוי (מנהל) ================= */
+/* ================= ייבוא / גיבוי ================= */
 el("importFile").addEventListener("change", async ev=>{
   const f = ev.target.files[0]; if(!f) return;
   try{
