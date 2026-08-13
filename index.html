@@ -1159,16 +1159,21 @@ el("addForm").addEventListener("submit", ev=>{
 });
 
 /* ================= כניסה והרשאות ================= */
-const STAFF_EMAIL = "team@adnei-eretz.com";
+/* קוד הגישה שהעובדים מקלידים. מאחורי הקלעים מתחברים דרך משתמש הצוות המשותף
+   שכבר יש לו הרשאת קריאה/כתיבה מלאה (עוקף את הצורך בהגדרת הרשאות נוספת). */
+const ACCESS_PIN = "4321";
+const STAFF_EMAIL = "staff@adnei-eretz.com";
+const STAFF_PASSWORD = "mai8351";
 let MYNAME = localStorage.getItem("cf-name") || "";
 function whoAmI(){ return (ME === STAFF_EMAIL) ? (MYNAME || "צוות") : ME; }
 async function pinLogin(){
   const pin = (el("auth-pin").value||"").trim();
   if(!pin){ el("auth-msg").textContent = "נא להזין את קוד הגישה"; return; }
+  if(pin !== ACCESS_PIN){ el("auth-msg").textContent = "קוד שגוי — נסו שוב"; return; }
   el("pin-btn").disabled = true; el("pin-btn").textContent = "נכנס…";
-  const {error} = await sb.auth.signInWithPassword({email: STAFF_EMAIL, password: "adnei-"+pin});
+  const {error} = await sb.auth.signInWithPassword({email: STAFF_EMAIL, password: STAFF_PASSWORD});
   el("pin-btn").disabled = false; el("pin-btn").textContent = "כניסה";
-  if (error){ el("auth-msg").textContent = "קוד שגוי — נסו שוב"; return; }
+  if (error){ el("auth-msg").textContent = "שגיאת התחברות — נסו שוב"; return; }
   /* ההמשך קורה אוטומטית דרך onAuthStateChange */
 }
 function saveName(){
