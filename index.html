@@ -296,6 +296,33 @@
   .cp-link{margin-top:12px; background:none; border:none; color:var(--accent); font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; padding:0}
   .cp-link:hover{text-decoration:underline}
 
+  /* scan */
+  .scan-card{margin-bottom:18px}
+  .scan-sub{margin:-4px 0 14px; font-size:13.5px; line-height:1.65; color:var(--ink-2)}
+  .scan-drop{
+    display:flex; flex-direction:column; align-items:center; gap:5px; cursor:pointer;
+    padding:26px 18px; text-align:center; border-radius:14px;
+    border:1.5px dashed var(--line-strong); background:var(--surface-2);
+    transition:border-color .16s, background .16s;
+  }
+  .scan-drop:hover{border-color:var(--accent); background:var(--surface)}
+  .scan-drop.busy{pointer-events:none; opacity:.6}
+  .scan-drop input{display:none}
+  .scan-ico{font-size:26px; line-height:1}
+  .scan-t{font-size:14.5px; font-weight:650; color:var(--ink)}
+  .scan-h{font-size:12px; color:var(--ink-3)}
+  .scan-out{margin-top:14px; display:flex; flex-direction:column; gap:7px}
+  .scan-row{
+    display:flex; align-items:center; gap:10px; font-size:13px;
+    padding:10px 13px; border-radius:10px; background:var(--surface-2);
+    border:1px solid var(--line);
+  }
+  .scan-row .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .scan-row .st{font-weight:650; font-size:12px; white-space:nowrap}
+  .scan-row.ok .st{color:#0f9d58}
+  .scan-row.bad .st{color:#d93025}
+  .scan-row.work .st{color:var(--ink-3)}
+
   /* check images */
   .img-field{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
   .img-thumb{
@@ -458,6 +485,17 @@
 
     <!-- ============ ADD ============ -->
     <section class="view" id="view-add">
+      <div class="card scan-card" style="max-width:640px">
+        <h2 class="sec">סריקה אוטומטית</h2>
+        <p class="scan-sub">העלו צילומים של צ'קים או קובצי PDF — המערכת תקרא מהם את המוטב, הסכום והתאריך ותוסיף אותם לתזרים. אפשר לבחור כמה קבצים יחד.</p>
+        <label class="scan-drop" id="scanDrop">
+          <span class="scan-ico">📎</span>
+          <span class="scan-t">בחרו קבצים לסריקה</span>
+          <span class="scan-h">תמונות (JPG/PNG) או PDF · אפשר לבחור כמה יחד</span>
+          <input id="scanFiles" type="file" accept="image/*,application/pdf,.pdf" multiple>
+        </label>
+        <div id="scanOut" class="scan-out"></div>
+      </div>
       <div class="card" style="max-width:640px">
         <h2 class="sec">רשומה חדשה</h2>
         <form id="addForm">
@@ -1257,6 +1295,100 @@ el("auth-pin").addEventListener("keydown", e=>{ if (e.key==="Enter") pinLogin();
 el("auth-name").addEventListener("keydown", e=>{ if (e.key==="Enter") saveName(); });
 sb.auth.onAuthStateChange((ev, session)=>{ if (session) enterApp(session); });
 sb.auth.getSession().then(({data})=>{ if (data && data.session) enterApp(data.session); });
+
+/* ================= סריקת צ'קים (תמונות ו-PDF) ================= */
+const SCAN_URL = SB_URL + "/functions/v1/scan-check";
+
+function fileToB64(f){
+  return new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = ()=> res(String(r.result).split(",")[1]);
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
+}
+
+async function scanOne(f){
+  const isPdf = f.type.includes("pdf") || /\.pdf$/i.test(f.name);
+  /* לתמונות משתמשים בדחיסה הקיימת כדי לחסוך בנפח, ל-PDF שולחים כמו שהוא */
+  let b64, thumb = null;
+  if (isPdf){
+    b64 = await fileToB64(f);
+  } else {
+    thumb = await compressImage(f);
+    b64 = thumb.split(",")[1];
+  }
+  const {data:{session}} = await sb.auth.getSession();
+  const r = await fetch(SCAN_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "apikey": SB_KEY,
+      "Authorization": "Bearer " + (session ? session.access_token : SB_KEY)
+    },
+    body: JSON.stringify({ image: b64, mime: isPdf ? "application/pdf" : "image/jpeg" })
+  });
+  if (!r.ok) throw new Error("שרת הסריקה החזיר " + r.status);
+  const out = await r.json();
+  return { out, thumb };
+}
+
+el("scanFiles").addEventListener("change", async ev=>{
+  const files = [...ev.target.files];
+  ev.target.value = "";
+  if (!files.length) return;
+  if (ROLE === "צפייה"){ toast("אין לך הרשאת עריכה"); return; }
+
+  const drop = el("scanDrop"), out = el("scanOut");
+  drop.classList.add("busy");
+  out.innerHTML = "";
+  const rows = files.map(f=>{
+    const d = document.createElement("div");
+    d.className = "scan-row work";
+    d.innerHTML = `<span class="nm">${esc(f.name)}</span><span class="st">סורק…</span>`;
+    out.appendChild(d);
+    return d;
+  });
+
+  let added = 0;
+  for (let i = 0; i < files.length; i++){
+    const st = rows[i].querySelector(".st");
+    try{
+      const {out: res, thumb} = await scanOne(files[i]);
+      if (!res.ok){
+        rows[i].className = "scan-row bad";
+        st.textContent = res.reason || "לא זוהה צ'ק";
+        continue;
+      }
+      const rec = {
+        id: newId(),
+        p: res.p || "ללא שם",
+        a: (res.a === 0 || res.a == null) ? null : +res.a,
+        d: (res.d || "").slice(0,10) || new Date().toISOString().slice(0,10),
+        c: res.c || "אחר",
+        t: "צ'ק",
+        n: res.note || "",
+        paid: false, img: false
+      };
+      store.records.push(rec);
+      if (thumb){ try{ await putImg(rec.id, thumb); }catch(e){} }
+      added++;
+      rows[i].className = "scan-row ok";
+      st.textContent = "✓ " + rec.p + (rec.a ? " · " + fmt(rec.a) : "") + " · " + rec.d;
+    }catch(e){
+      rows[i].className = "scan-row bad";
+      st.textContent = "שגיאה — נסו שוב";
+    }
+  }
+
+  drop.classList.remove("busy");
+  if (added){
+    cloudSave(); initAdd(); rerender();
+    toast("נוספו " + added + " רשומות וסונכרנו לכולם ✓");
+  } else {
+    toast("לא נוספו רשומות");
+  }
+});
 
 /* ================= ייבוא / גיבוי ================= */
 el("importFile").addEventListener("change", async ev=>{
