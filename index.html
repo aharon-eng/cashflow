@@ -479,6 +479,12 @@
           <option value="all">הכל</option>
         </select>
         <select class="flt" id="fMonth"><option value="">כל החודשים</option></select>
+        <select class="flt" id="fSort">
+          <option value="due">מיון: תאריך פירעון</option>
+          <option value="ts-new">מיון: תאריך הזנה — חדש קודם</option>
+          <option value="ts-old">מיון: תאריך הזנה — ישן קודם</option>
+        </select>
+        <button class="flt" id="exportXls" type="button" style="cursor:pointer">⬇ ייצוא לאקסל</button>
       </div>
       <div id="listOut"></div>
     </section>
@@ -1009,6 +1015,26 @@ function renderList(){
     extra = `<div class="alert warn" style="margin-bottom:12px">מסנן פעיל: <b>${lbl}</b> — ${recs.length} רשומות · ${fmt(s)}
       <button class="a-link" onclick="clearSpecial()">ניקוי</button></div>`;
   }
+  /* מיון לפי תאריך הזנה — תצוגה שטוחה מקובצת לפי יום ההזנה */
+  const srt = el("fSort").value;
+  if (srt !== "due"){
+    recs = recs.slice().sort((a,b)=> srt==="ts-new" ? recTs(b)-recTs(a) : recTs(a)-recTs(b));
+    const byE = new Map();
+    for (const r of recs){
+      const k = new Date(recTs(r)).toISOString().slice(0,10);
+      if(!byE.has(k)) byE.set(k,[]); byE.get(k).push(r);
+    }
+    let h2 = extra;
+    for (const [k, list] of byE){
+      const s = list.filter(r=>r.a!=null && !r.paid).reduce((s2,r)=>s2+r.a,0);
+      h2 += `<div class="month-hdr"><span>הוזן ב-${fDate(k)}</span><span class="m-sum">${list.length} רשומות · ${fmt(s)}</span></div>`;
+      h2 += `<div class="rows">` + list.map(r=>rowHTML(r,cos)).join("") + `</div>`;
+    }
+    el("listOut").innerHTML = h2 || `<div class="card empty">לא נמצאו רשומות</div>`;
+    el("listOut").querySelectorAll(".row").forEach(n=> n.addEventListener("click",()=> openEdit(n.dataset.id)));
+    return;
+  }
+
   const byM = new Map();
   for (const r of recs){ const k=monthKey(r.d); if(!byM.has(k)) byM.set(k,[]); byM.get(k).push(r); }
   let html = extra;
@@ -1025,6 +1051,32 @@ window.clearSpecial = function(){ state.miss=false; state.overdue=false; state.r
 el("q").addEventListener("input", renderList);
 el("fStatus").addEventListener("change", renderList);
 el("fMonth").addEventListener("change", renderList);
+el("fSort").addEventListener("change", renderList);
+
+/* זמן ההזנה של רשומה: שדה ts אם קיים, אחרת משוחזר מהמזהה (שמקודד את רגע היצירה) */
+function recTs(r){
+  if (r.ts){ const t = Date.parse(r.ts); if (!isNaN(t)) return t; }
+  const m = String(r.id||"").match(/^r([0-9a-z]{8})/);
+  return m ? parseInt(m[1], 36) : 0;
+}
+
+/* ייצוא לאקסל (CSV עם BOM — נפתח נכון בעברית) */
+function exportExcel(){
+  const recs = allRecords().slice().sort((a,b)=> a.d<b.d?-1:a.d>b.d?1:0);
+  const c = v => '"' + String(v==null?"":v).replace(/"/g,'""') + '"';
+  const rows = [["מוטב","סכום","תאריך פירעון","חברה","סוג","הערה","סטטוס","תאריך הזנה"].map(c).join(",")];
+  for (const r of recs){
+    const ts = recTs(r);
+    rows.push([r.p, r.a==null?"":r.a, r.d, r.c, r.t||"", r.n||"", r.paid?"שולם":"פתוח",
+      ts ? new Date(ts).toLocaleString("he-IL") : ""].map(c).join(","));
+  }
+  const b = new Blob(["﻿"+rows.join("\r\n")], {type:"text/csv;charset=utf-8"});
+  const u = URL.createObjectURL(b);
+  const a = document.createElement("a"); a.href=u; a.download="תזרים-אדני-ארץ.csv"; a.click();
+  URL.revokeObjectURL(u);
+  toast("הקובץ ירד — נפתח באקסל ✓");
+}
+el("exportXls").addEventListener("click", exportExcel);
 
 /* ================= צילומי צ'קים (נשמרים בענן המשותף) ================= */
 const imgIds = new Set();
@@ -1183,7 +1235,7 @@ el("addForm").addEventListener("submit", ev=>{
     c: co,
     t: el("aType").value,
     n: el("aNote").value.trim(),
-    paid: false, img: false
+    paid: false, img: false, ts: new Date().toISOString()
   };
   store.records.push(rec);
   const finish = ()=>{
@@ -1368,7 +1420,7 @@ el("scanFiles").addEventListener("change", async ev=>{
         c: res.c || "אחר",
         t: "צ'ק",
         n: res.note || "",
-        paid: false, img: false
+        paid: false, img: false, ts: new Date().toISOString()
       };
       store.records.push(rec);
       if (thumb){ try{ await putImg(rec.id, thumb); }catch(e){} }
@@ -1402,7 +1454,8 @@ el("importFile").addEventListener("change", async ev=>{
         const rec = {
           id: newId(), p: String(r.p), d: String(r.d).slice(0,10),
           a: (r.a==null || r.a==="") ? null : +r.a,
-          c: String(r.c || "אחר"), n: r.n || "", paid: !!r.paid, img: false
+          c: String(r.c || "אחר"), n: r.n || "", paid: !!r.paid, img: false,
+          ts: r.ts || new Date().toISOString()
         };
         if (r.t) rec.t = r.t;
         store.records.push(rec);
